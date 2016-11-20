@@ -1,0 +1,339 @@
+FactorResultFull <- function(x,y,flag = 0) #If our x and y variables are all full (Without NA), we use this function,return a picture with t value and correlation vector (if flag = 1)
+{
+  na <- names(MovingLR)[5:dim(MovingLR)[2]]
+  name <- na[MovingLR[1,5:dim(MovingLR)[2]]==x[1]]
+  xl <- length(x)
+  yl <- length(y)
+  if(xl!=yl)  #If this situation met, it means we have a potential error here, so we return the value
+    return(c(xl,yl))
+  else
+  {
+    cors <- vector()
+    ts <- vector()
+    for(i in 0:min(floor(xl/2),50))
+    {
+      xtemp <- x[1:(xl-i)]
+      ytemp <- y[(1+i):xl]
+      cors[i+1] <- summary(lm(ytemp~xtemp))$coefficient[2,1]
+      ts[i+1] <- summary(lm(ytemp~xtemp))$coefficient[2,3]
+    }
+    #plot(c(0:min(floor(xl/2),50)),cors,type = 'l',xlab = 'Number of Lags',cex.axis = 1)
+    #grid()
+    #axis(1, 1:floor(xl/2), c(0:(floor(xl/2)-1)), col.axis = "blue")
+    plot(c(0:min(floor(xl/2),50)),ts,type = 'l',xlab = 'Number of Lags',cex.axis = 1)
+    grid()
+    title(name)
+    #axis(1, 1:floor(xl/2), c(0:(floor(xl/2)-1)), col.axis = "blue")
+    if(flag==1)
+      return(cors)
+  }
+}
+
+FactorResultMacroIO <- function(n,flag = 0) #Test factor performance for Macro variables, here our input is not the whole variable, but the number representing this variable, our process and return values are similiar
+{
+  xl <- length(MDLR[,n])
+  yl <- length(MDLR$X1M.Avareage.Price[!is.na(MDLR$X1M.Avareage.Price)])
+  cors <- vector()
+  ts <- vector()
+  for(i in 0:min((yl-1),20))
+  {
+    xtemp <- MDLR[(22-i):(22-i+yl-1),n]
+    ytemp <- MDLR$X1M.Avareage.Price[!is.na(MDLR$X1M.Avareage.Price)]
+    mid <- cbind(xtemp,ytemp)
+    mid <- as.data.frame(mid[complete.cases(mid),])
+    if(length(xtemp)!=length(ytemp))
+      return(c(i,length(xtemp),length(ytemp)))
+    xtemp <- mid$xtemp
+    ytemp <- mid$ytemp
+    cors[i+1] <- summary(lm(ytemp~xtemp))$coefficient[2,1]
+    ts[i+1] <- summary(lm(ytemp~xtemp))$coefficient[2,3]
+  }
+  plot(c(0:min((yl-1),20)),cors,type = 'l') #plot the correlations
+  grid()
+  plot(c(0:min((yl-1),20)),ts,type = 'l') #plot the t values
+  grid()
+  if(flag==1)
+    return(cors)
+}
+
+FactorResultWeekly <- function(x,y,flag = 0) #A specific function for weekly data, others are similiar
+{
+    if(is.na(x[1])||is.infinite(x[1])) #If x[1] is NA or infinate, use x[2]'s value replace it
+    x[1] <- x[2]
+    if(sum(is.na(x))==0) #We divide this function into 2 situations, first is that there is no NAs in the vector, we do the following
+  {
+    na <- names(MovingLR)[5:dim(MovingLR)[2]]
+    name <- na[!is.na(MovingLR[1,5:dim(MovingLR)[2]]==x[1])&(MovingLR[1,5:dim(MovingLR)[2]]==x[1])] #Get the name of our input vector, using this crateria. But sometimes this is not working, since multiple columns have the same first value.
+    #if x is NA, replace it with 0
+    x[is.na(x)] <- 0
+    ys <- length(y)
+    ya <- y[!is.na(y)]
+    yl <- length(ya)
+    cors <- vector()
+    ts <- vector()  
+    returnlist <- list()
+    returnlist[[4]] <- c(ys,yl)
+    if((sum(is.na(x))==0)&(sum(is.na(y))==0))
+    {
+        return(FactorResultFull(x,y,1))   #If both x and y are without NA, we use the first function is enough.
+    }
+    for(i in 0:20) #If there are NAs in y, we can use the following procedure to get the correlations
+    {
+      xtemp <- x[(1+(ys-yl)-i):((1+(ys-yl)-i)+yl-1)]
+      newdata <- NA
+      if(length(xtemp)==length(ya)){
+        newdata <- cbind(xtemp,ya)}
+      if(length(xtemp)!=length(ya))
+      {
+        returnlist[[1]] <- paste("WRONG!",sep = " ",i)
+        returnlist[[2]] <- c(length(xtemp),length(ya))
+        returnlist[[3]] <- c(ys,yl)
+        return(returnlist)
+      }
+      cors[i+1] <- summary(lm(ya~xtemp,data = as.data.frame(newdata)))$coefficient[2,1]
+      ts[i+1] <- summary(lm(ya~xtemp,data = as.data.frame(newdata)))$coefficient[2,3]
+    }
+    # plot(c(0:20),cors,type = 'l',xlab = 'Number of Lags',cex.axis = 1)
+    #grid()
+    #axis(1, 1:26, c(0:25), col.axis = "blue")
+    plot(c(0:20),ts,type = 'l',xlab = 'Number of Lags',cex.axis = 1)
+    grid()
+    #axis(1, 1:26, c(0:25), col.axis = "blue")
+    title(name)
+    if(flag==1)
+      return(ts)
+    }
+  if(sum(is.na(x))>0) #If NA does exist in vector x, we do the following process
+  {
+    temp <- cbind(x,y)
+    temp <- temp[(sum(is.na(x))+1):length(x),] #just left the complete cases
+    rm(x)
+    rm(y)
+    x <- temp[,1]
+    y <- temp[,2]
+    if((sum(is.na(x))==0)&(sum(is.na(y))==0)) #if new x and y are all full, use the first function, otherwise use the new function below, which is bisically copied from the function above.
+    {
+      return(FactorResultFull(x,y,1))
+    }
+    if((sum(is.na(x))!=0)||(sum(is.na(y))!=0))
+    {
+      ys <- length(y)
+      ya <- y[!is.na(y)]
+      yl <- length(ya)
+      cors <- vector()
+      ts <- vector()  
+      returnlist <- list()
+      returnlist[[4]] <- c(ys,yl)
+      for(i in 0:min(20,(sum(is.na(y))-1)))
+      {
+        xtemp <- x[(1+(ys-yl)-i):((1+(ys-yl)-i)+yl-1)]
+        newdata <- NA
+        if(length(xtemp)==length(ya))
+          newdata <- cbind(xtemp,ya)
+        else
+        {
+          
+          returnlist[[1]] <- paste("WRONG!",sep = " ",i)
+          returnlist[[2]] <- c(length(xtemp),length(ya))
+          returnlist[[3]] <- c(ys,yl)
+          return(returnlist)
+        }
+        cors[i+1] <- summary(lm(ya~xtemp,data = as.data.frame(newdata)))$coefficient[2,1]
+        ts[i+1] <- summary(lm(ya~xtemp,data = as.data.frame(newdata)))$coefficient[2,3]
+      }
+      # plot(c(0:20),cors,type = 'l',xlab = 'Number of Lags',cex.axis = 1)
+      #grid()
+      #axis(1, 1:26, c(0:25), col.axis = "blue")
+      plot(c(0:min(20,(sum(is.na(y))-1))),ts,type = 'l',xlab = 'Number of Lags',cex.axis = 1)
+      grid()
+      #axis(1, 1:26, c(0:25), col.axis = "blue")
+      title(name)
+      if(flag==1)
+        return(ts)}
+  }
+}
+
+FactorResultDaily <- function(x,y,flag = 0) #Get result of daily variables, structures are similiar to the previous functions
+{
+  na <- names(MovingDLR)[5:dim(MovingDLR)[2]]
+  name <- na[!is.na(MovingDLR[1,5:dim(MovingDLR)[2]]==x[1])&(MovingDLR[1,5:dim(MovingDLR)[2]]==x[1])]
+  date <- MovingDLR$Ndate
+  ys <- length(y)
+  ya <- y[!is.na(y)]
+  yl <- length(ya)
+  cons <- vector()
+  cors <- vector()
+  ts <- vector()  
+  returnlist <- list()
+  returnlist[[4]] <- c(ys,yl)
+  for(i in 0:20)
+  {
+    if((1+(ys-yl)-i) >0)
+    {
+      xtemp <- x[(1+(ys-yl)-i):((1+(ys-yl)-i)+yl-1)]
+      newdata <- NA
+      if(length(xtemp)==length(ya))
+        newdata <- cbind(xtemp,ya)
+      else
+      {
+        
+        returnlist[[1]] <- paste("WRONG!",sep = " ",i)
+        returnlist[[2]] <- c(length(xtemp),length(ya))
+        returnlist[[3]] <- c(ys,yl)
+        return(returnlist)
+      }
+      newdata <- newdata[complete.cases(newdata),]
+      cons[i+1] <- summary(lm(ya~xtemp,data = as.data.frame(newdata)))$coefficient[1,1]
+      cors[i+1] <- summary(lm(ya~xtemp,data = as.data.frame(newdata)))$coefficient[2,1]
+      ts[i+1] <- summary(lm(ya~xtemp,data = as.data.frame(newdata)))$coefficient[2,3]
+    }
+    else
+    {
+    }
+  }
+  # plot(c(0:20),cors,type = 'l',xlab = 'Number of Lags',cex.axis = 1)
+  #grid()
+  #axis(1, 1:26, c(0:25), col.axis = "blue")
+  plot(c(0:20),ts,type = 'l',xlab = 'Number of Lags',cex.axis = 1)
+  grid()
+  #axis(1, 1:26, c(0:25), col.axis = "blue")
+  title(name)
+  returnm <- as.data.frame(cbind(cons,cors,ts))
+  if(flag==1)
+  {
+    return(ts)
+  }
+}
+
+EWMA <- function(x,a=0.5)
+{
+    #get the moving average series using specific time series
+  xl <- length(x)
+  res <- vector()
+  res[1] <- x[1]
+  for(i in 2:xl)
+  {
+    res[i] <- a*x[i] + (1-a) * res[i-1]
+  }
+  return(res[length(res)])
+}
+
+rollEWMA <- function(x,step,a = 0.5)
+{
+    #Get the specific number of lags in our moving average series
+  xl <- length(x)
+  tn <- xl-step+1
+  res <- vector()
+  for(i in 1:tn)
+  {
+    temp <- x[i:(i+step-1)]
+    res[i] <- EWMA(temp,a)
+  }
+  return(res)
+}
+
+tRatioNotFull <- function(x,y)
+{
+  ys <- length(y)
+  ya <- y[!is.na(y)]
+  yl <- length(ya)
+  ts <- vector()  
+  temp <- as.data.frame(cbind(x,y))
+  temp <- temp[(sum(as.numeric(is.na(temp$y)))):dim(temp)[1],]
+  totalite <- yl-30
+  returnlist <- list()
+  for(i in 1:(totalite-1))
+  {
+    xtemp <- temp$x[1:(30+i)]
+    ytemp <- temp$y[2:(31+i)]
+    if(!(sum(xtemp)==0))
+      ts[i] <- summary(lm(ytemp~xtemp))$coefficient[2,3]
+    else
+      ts[i] <- 0
+  }
+  posinum <- sum(as.numeric(ts>0))
+  neginum <- sum(as.numeric(ts<0))
+  totalnum <- posinum + neginum
+  return(max(posinum/totalnum,neginum/totalnum))
+}
+
+tRatioFull <- function(x,y)
+{
+  temp <- as.data.frame(cbind(x,y))
+  temp <- temp[complete.cases(temp),]
+  yl <- dim(temp)[1]
+  totalite <- yl-30
+  for(i in 1:(totalite-1))
+  {
+    xtemp <- temp$x[1:(30+i)]
+    ytemp <- temp$y[2:(31+i)]
+    ts[i] <- summary(lm(ytemp~xtemp))$coefficient[2,3]
+  }
+  posinum <- sum(as.numeric(ts>0))
+  neginum <- sum(as.numeric(ts<0))
+  totalnum <- posinum + neginum
+  return(max(posinum/totalnum,neginum/totalnum))
+}
+
+mypercent <- function(x,y)
+{
+  x <- sort(x)
+  numbersmaller <- sum(as.numeric(x<y))
+  return(numbersmaller/length(x))
+}
+
+GLratio <- function(x)
+{
+  return(abs(mean(x[x>0])/mean(x[x<0])))
+}
+
+SimpleStrategy <- function(x,y,flag,isday=1) #Get the factor return using the samplist strategy(assume 1 or -1 of the lagged t value)
+{
+  temp <- cbind(x,y)
+  returnvec <- vector()
+  posivec <- vector()
+  negivec <- vector()
+  countp <- 1
+  countn <- 1
+  temp <- temp[complete.cases(temp),]
+  if(flag==1)
+  {  
+    for(i in 2:dim(temp)[1])
+    {
+      if(temp[i-1,1]>0)
+      { returnvec[i-1] <- temp[i,2]
+      posivec[countp] <- temp[i,2]
+      countp <- countp +1}
+      if(temp[i-1,1]<=0)
+      {returnvec[i-1] <- -temp[i,2]
+      negivec[countn] <- -temp[i,2]
+      countn <- countn +1}
+    }
+  }
+  if(flag==-1)
+  {  
+    for(i in 2:dim(temp)[1])
+    {
+      if(temp[i-1,1]>0)
+      {returnvec[i-1] <- -temp[i,2]
+      negivec[countn] <- -temp[i,2]
+      countn <- countn +1}
+      if(temp[i-1,1]<=0)
+      {returnvec[i-1] <- temp[i,2]
+      posivec[countp] <- temp[i,2]
+      countp <- countp +1}
+    }
+  }
+  r1 <- prod(exp(returnvec))-1
+  r2 <- (1+r1)^(1/(dim(temp)[1]/250))-1
+  rp <- prod(exp(posivec))^(1/(length(posivec)/250))-1
+  rn <- prod(exp(negivec))^(1/(length(negivec)/250))-1
+  if(isday==0)
+    r2 <- (1+r1)^(1/(dim(temp)[1]/52))-1
+  return(c(r1,r2,rp,rn))
+}
+
+sharp <- function(returnl)
+{
+  return((mean(returnl)/sqrt(var(returnl)))*sqrt(252))
+}
