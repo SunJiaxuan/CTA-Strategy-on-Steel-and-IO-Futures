@@ -1,0 +1,777 @@
+#--------------------------------Result For Daily Data------------------------------------
+Ddata <- read.csv("Daily Data.csv")
+D <- Ddata
+if(names(D)[length(names(D))]=="X")
+{
+  D <- D[,1:(dim(D)[2]-1)]
+}
+
+summary(D)
+
+#Deal with all the 0s in the data
+for(j in 8:(dim(D)[2]))
+{
+  for(i in 2:dim(D)[1])
+  {
+    if((!is.na(D[i,j]))&&(D[i,j]==0))
+      D[i,j] = D[i-1,j]
+    else
+    {
+      if(is.na(D[i,j]))
+      D[i,j] = D[i-1,j]
+    }
+  }
+}
+DLR <- NA
+DLR <- D
+#到这里我们可以保证每一个数据都是我们到对应日期的当晚可以得到的
+for(j in 3:dim(D)[2])
+{
+  for(i in 2:dim(D)[1])
+  {
+    DLR[i,j] <- log(D[i,j]/D[i-1,j])  #DLR[i,j] stores the return result from i-1 to i, because we only know this value when time has come to i. So it's reasonable. Because we use i-1's x trying to predict i's y. 
+  }
+}
+DLR <- DLR[2:(dim(DLR)[1]),]
+
+FactorResultDaily(DLR$RMBperAUD,DLR$IO) #Posi, Sig
+
+FactorResultWeekly(DLR$ElectricityDailyCoalUse.S5116614.,DLR$JM)
+
+MovingDLR <- DLR
+step <- 20
+MovingDLR <- MovingDLR[(step):dim(DLR)[1],]
+for(j in 4:21)
+{
+  MovingDLR[,j] <- rollEWMA(DLR[,j],step)
+}
+
+FactorResultDaily(MovingDLR$ElectricityDailyCoalUse.S5116614.,MovingDLR$JM) #Negi, Not so Sig
+
+#Try Level factor for our strategy
+#level 这些东西可以用sort等函数找到，最后输出的就是一个小数，看我们感兴趣的这个数字在整个vector的哪个位置上即可
+head(D)
+MDLRTrend <- MovingDLR
+period <- 90
+MDLRTrend <- MDLRTrend[(period+1):dim(MDLRTrend)[1],]
+for(i in 1:dim(MDLRTrend)[1])
+{
+  for(j in 8:dim(MDLRTrend)[2])
+    MDLRTrend[i,j] <- mypercent(D[i:(i+period),j],D[i+90,j])
+}
+
+#Try to use level as an indicator here,the result seems not vey good, because our position is always minus, 这跟
+#之前的行情刚好符合，并不能说是我们得策略的好处
+IOreturnsLevel <- data.frame(30,3)
+for(i in 8:26)
+{
+    temp <- FactorResultD(MDLRTrend[,i],MDLRTrend$IO,1,1)
+    IOreturnsLevel[i-7,2] <- temp[[1]]
+    IOreturnsLevel[i-7,3] <- mean(as.numeric(temp[[2]]>0))
+    IOreturnsLevel[i-7,1] <- name[i]
+    #print(table(temp[[4]]))
+}
+
+#Generate a Benchmark for our strategy
+x <- MovingDLR$USDperAUD
+y <- MovingDLR$IO
+temp <- cbind(x,y)
+temp <- as.data.frame(temp[complete.cases(temp),])
+returnlist <- matrix(nrow = 1000,ncol = (dim(temp)[1]-1))
+for(path in 1:1000)
+{
+  for(i in 1:(dim(temp)[1]-1))
+  {
+    if(rnorm(1)>0)
+    {
+      returnlist[path,i] <- temp$y[i+1]
+    }
+    else
+      returnlist[path,i] <- -temp$y[i+1]
+  }
+}
+quantile(((apply(exp(returnlist),1,prod))-1),c(0.9,0.95,0.99))
+#      Min.    1st Qu.     Median       Mean    3rd Qu.       Max. 
+#  -0.368800 -0.094780   -0.005814    0.007094 0.092020    0.661100 
+#It means that our simple strategy is working
+
+FactorResultD <- function(x,y,holding = 1,outputdetail = 0)
+{
+  returnlist <- vector()
+  totalresult <- FactorResultDaily(x,y,1)
+  tresult <- totalresult
+  # con <- totalresult$cons[2]
+  # cor <- totalresult$cors[2]
+  flag <- sign(tresult[2])
+  positiondirection <- vector()
+  if(holding==1)
+  {
+    temp <- cbind(x,y)
+    temp <- as.data.frame(temp[complete.cases(temp),])
+    returnlist <- vector()
+    for(i in 1:(dim(temp)[1]-1))
+      {
+        if((temp$x[i])>0)
+        {
+          returnlist[i] <- temp$y[i+1]
+          positiondirection[i] <- 1
+        }
+        else
+        {
+          returnlist[i] <- -temp$y[i+1]
+          positiondirection[i] <- -1}
+        }
+    returntotal <- prod(exp(returnlist))-1
+    returnl <- list()
+    returnl[[1]] <- returntotal
+    returnl[[2]] <- returnlist
+    returnl[[3]] <- flag
+    returnl[[4]] <- positiondirection
+    if(outputdetail==1)
+      return(returnl)
+    else
+      return(returntotal) 
+  }
+  else #Holding Period is not 1 day, not done yet
+  {
+    date <- MovingDLR$Ndate
+    temp <- as.data.frame(cbind(date,x,y))
+    temp <- as.data.frame(temp[complete.cases(temp),])
+    returnlist <- vector()
+    htemp <- temp[seq(1,dim(temp)[1],holding),]
+    for(i in 1:dim(htemp)[1])
+    {
+        if(flag==1)
+      {
+        for(i in 1:(dim(htemp)[1]-1))
+        {
+          if((htemp$x[i]*cor+cons)>0)
+          {
+            returnlist[i] <- htemp$y[i+1]
+          }
+          else
+            returnlist[i] <- -htemp$y[i+1]
+        }
+      }
+      if(flag==-1)
+      {
+        for(i in 1:(dim(htemp)[1]-1))
+        {
+          if((htemp$x[i]*cor+cons)>0)
+          {
+            returnlist[i] <- -htemp$y[i+1]
+          }
+          else
+            returnlist[i] <- htemp$y[i+1]
+        }
+      }
+    }
+    returntotal <- (prod(exp(returnlist)))^(1/((htemp$date[length(htemp$date)]-htemp$date[1])/250))-1
+    returnl <- list()
+    returnl[[1]] <- returntotal
+    returnl[[2]] <- returnlist
+    if(outputdetail==1)
+      return(returnl)
+    else
+      return(returntotal)    
+  }
+}
+
+name <- names(MovingDLR)
+IOreturns <- data.frame(30,4)
+for(i in 8:26)
+{
+  if(i==21000) #Not going to happen
+  {temp <- cbind(MovingDLR[,i],MovingDLR$IO)
+  temp <- as.data.frame(temp[complete.cases(temp),])
+  temp <- temp[!is.infinite(temp$V1),]
+  temp1 <- FactorResultD(temp$V1,temp$V2,1,1)
+  IOreturns[i-4,2] <- temp1[[1]]
+  IOreturns[i-4,3] <- mean(as.numeric(temp1[[2]]>0))
+  IOreturns[i-4,1] <- name[i]}
+  else
+  {
+    temp <- FactorResultD(MovingDLR[,i],MovingDLR$IO,1,1)
+    IOreturns[i-7,2] <- temp[[1]]
+    IOreturns[i-7,3] <- mean(as.numeric(temp[[2]]>0))
+    IOreturns[i-7,1] <- name[i]
+    IOreturns[i-7,4] <- temp[[3]]
+    print(table(temp[[4]]))
+  }
+}
+
+#Try a longer holding period lets say 5 days
+IOreturns5 <- data.frame(30,3)
+for(i in 8:26)
+{
+  if(i==21000) #Not going to happen
+  {temp <- cbind(MovingDLR[,i],MovingDLR$IO)
+  temp <- as.data.frame(temp[complete.cases(temp),])
+  temp <- temp[!is.infinite(temp$V1),]
+  temp1 <- FactorResultD(temp$V1,temp$V2,1,1)
+  IOreturns[i-4,2] <- temp1[[1]]
+  IOreturns[i-4,3] <- mean(as.numeric(temp1[[2]]>0))
+  IOreturns[i-4,1] <- name[i]}
+  else
+  {
+    temp <- FactorResultD(MovingDLR[,i],MovingDLR$IO,5,1)
+    IOreturns5[i-7,2] <- temp[[1]]
+    IOreturns5[i-7,3] <- mean(as.numeric(temp[[2]]>0))
+    IOreturns5[i-7,1] <- name[i]
+  }
+}
+
+RBreturns <- data.frame(30,4)
+for(i in 8:26)
+{
+  temp <- FactorResultD(MovingDLR[,i],MovingDLR$RB,1,1)
+  RBreturns[i-7,2] <- temp[[1]]
+  RBreturns[i-7,3] <- mean(as.numeric(temp[[2]]>0))
+  RBreturns[i-7,1] <- name[i]
+  RBreturns[i-7,4] <- temp[[3]]
+  print(list(name[i],table(temp[[4]])))
+}
+
+HCreturns <- data.frame(30,4)
+for(i in 8:26)
+{
+  temp <- FactorResultD(MovingDLR[,i],MovingDLR$HC,1,1)
+  HCreturns[i-7,2] <- temp[[1]]
+  HCreturns[i-7,3] <- mean(as.numeric(temp[[2]]>0))
+  HCreturns[i-7,1] <- name[i]
+  HCreturns[i-7,4] <- temp[[3]]
+}
+
+Jreturns <- data.frame(30,4)
+for(i in 8:26)
+{
+  temp <- FactorResultD(MovingDLR[,i],MovingDLR$J,1,1)
+  Jreturns[i-7,2] <- temp[[1]]
+  Jreturns[i-7,3] <- mean(as.numeric(temp[[2]]>0))
+  Jreturns[i-7,1] <- name[i]
+  Jreturns[i-7,4] <- temp[[3]]
+  print(table(temp[[4]]))
+}
+
+JMreturns <- data.frame(30,4)
+for(i in 8:26)
+{
+  temp <- FactorResultD(MovingDLR[,i],MovingDLR$JM,1,1)
+  JMreturns[i-7,2] <- temp[[1]]
+  JMreturns[i-7,3] <- mean(as.numeric(temp[[2]]>0))
+  JMreturns[i-7,1] <- name[i]
+  JMreturns[i-7,4] <- temp[[3]]
+  print(table(temp[[4]]))
+}
+
+TotalDailyDataReturn <- cbind(IOreturns[,1:2],RBreturns[,2],HCreturns[,2],Jreturns[,2],JMreturns[,2])
+names(TotalDailyDataReturn) <- c("Indicator","IO","RB","HC","J","JM")
+
+TotalDailyDataReturnWinRate <- cbind(IOreturns[,c(1,3)],RBreturns[,3],HCreturns[,3],Jreturns[,3],JMreturns[,3])
+names(TotalDailyDataReturnWinRate) <- c("Indicator","IO","RB","HC","J","JM")
+
+Direction <- cbind(IOreturns[,c(1,4)],RBreturns[,4],HCreturns[,4],Jreturns[,4],JMreturns[,4])
+
+length(MovingDLR$J[!is.na(MovingDLR$J)])
+length(MovingDLR$JM[!is.na(MovingDLR$JM)])
+
+#检查一下这个策略会不会有非常频繁的调仓
+table(FactorResultD(MovingDLR[,26],MovingDLR$RB,1,1)[[4]])
+#好像不是非常的频繁，主要都是空头，只有少数是多头，对比一下还是本来的sharp ratio好一些
+testall <- rep(TRUE,length(FactorResultD(MovingDLR[,26],MovingDLR$RB,1,1)[[4]]))
+test <- FactorResultD(MovingDLR[,26],MovingDLR$RB,1,1)[[4]]>0
+r <- prod(exp(FactorResultD(MovingDLR[,26],MovingDLR$RB,1,1)[[2]][test]))-1
+rall <- prod(exp(FactorResultD(MovingDLR[,26],MovingDLR$RB,1,1)[[2]][testall]))-1
+sharptest <- (((1+r)^(1/(length(MovingDLR$RB)/250)))-1)/sqrt(250*var(FactorResultD(MovingDLR[,26],MovingDLR$RB,1,1)[[2]][test]))
+sharpall <- (((1+rall)^(1/(length(MovingDLR$RB)/250)))-1)/sqrt(250*var(FactorResultD(MovingDLR[,26],MovingDLR$RB,1,1)[[2]][testall]))
+
+#Basically we can say that the relationship between t value and strategy returns are significant
+
+#--------------------------------Result For Weekly Data------------------------------------
+data <- read.csv("SData.csv")
+data <- data[1:214,]
+#Generate Log returns
+LR <- NA
+LR <- data
+for(j in 5:(dim(data)[2]-5))
+{
+  for(i in 2:dim(data)[1])
+  {
+    if((!is.na(data[i,j]))&&(data[i,j]==0))
+      data[i,j] = data[i-1,j]
+    else
+    {
+      if(is.na(data[i,j]))
+        data[i,j] = data[i-1,j]
+    }
+  }
+}
+for(j in 5:(dim(data)[2]-5))
+{
+  for(i in 2:dim(data)[1])
+  {
+    LR[i,j] <- log(data[i,j]/data[i-1,j])
+    #if(is.nan(log(data[i,j]/data[i-1,j])))
+    #{
+    #print(i)
+    # print(j)
+    #}
+  }
+}
+LR <- LR[2:dim(LR)[1],] #去掉最上面的一行数据
+head(LR)
+
+#Generate a new indicator
+LR$SotokTotal <- NA  #如果工厂库存下降而港口库存上升，好，abs(乘积)，如果工厂库存下降港口库存也下降，非常好，2*abs（乘积）。
+#如果工厂库存上升而港口库存下降，差，-abs(乘积)，如果工厂库存上升港口库存也上升，非常好，-2*abs（乘积）。
+for(i in 1:dim(LR)[1])
+{
+  if(is.na(LR$IO.Factory.Stock[i]))
+    LR$SotokTotal[i] <- NA
+  else
+  {
+    if((LR$IO.Factory.Stock[i]==0))
+      LR$SotokTotal[i] <- 0
+    else
+    {
+      if((LR$IO.Factory.Stock[i]<0)&(LR$IO.Port.stock[i]>0))
+        LR$SotokTotal[i] <- abs(LR$IO.Factory.Stock[i]*LR$IO.Port.stock[i])
+      if((LR$IO.Factory.Stock[i]<0)&(LR$IO.Port.stock[i]<0))
+        LR$SotokTotal[i] <- 5*abs(LR$IO.Factory.Stock[i]*LR$IO.Port.stock[i])
+      if((LR$IO.Factory.Stock[i]>0)&(LR$IO.Port.stock[i]<0))
+        LR$SotokTotal[i] <- -abs(LR$IO.Factory.Stock[i]*LR$IO.Port.stock[i])
+      if((LR$IO.Factory.Stock[i]>0)&(LR$IO.Port.stock[i]>0))
+        LR$SotokTotal[i] <- -5*abs(LR$IO.Factory.Stock[i]*LR$IO.Port.stock[i])
+    }
+  }
+}
+
+LR <- LR[,c(1:(dim(LR)[2]-6),dim(LR)[2],(dim(LR)[2]-5):(dim(LR)[2]-1))]
+
+#cor(LR[,3:dim(LR)[2]])
+#lmresult <- list()
+#lmresult[["mod1"]] <- 1
+#for(i in 3:(dim(LR)[2]-1))
+#{
+#  print(i)
+#  lmresult[[paste("mod",sep='',i)]] <- summary(lm(LR$IOPrices~LR[,i]))$coefficient
+#}
+
+#tvalue <- vector()
+#for(i in 1:(dim(LR)[2]-3))
+#{
+#  tvalue[i] <- lmresult[[i]][2,3]
+#}
+#sig <- c(11,14,16 ,18 ,19 ,26 ,28)
+#这块做的可能不是特别的准确
+#tvalue[sig]
+#11 14 16 18 19 26 28
+#IOProducationIncreaseRate
+#FineCURate
+#BlastCURate
+#BarPriceIndex
+#BarPriceChina
+#CarSalesAmount
+#USDIndex
+
+#For this part, it's weekly data, result is not very good
+#可以尝试用
+FactorResultWeekly(LR$IO.Port.stock,LR$IOPrices) #Negi, not Sig
+FactorResultWeekly(LR$IO.Aus.Stock,LR$IOPrices) #Negi, not Sig
+FactorResultWeekly(LR$IO.Brizel.Stock,LR$IOPrices) #Negi, not Sig
+FactorResultWeekly(LR$IO.Port.stock1,LR$IOPrices) #Negi, Sig, One possible way is to get a mean of these 2 numbers
+FactorResultWeekly(LR$IO.Factory.Stock,LR$IOPrices) #Negi, not Sig
+FactorResultWeekly(LR$Fine.Stock,LR$IOPrices) #Negi, not Sig
+FactorResultWeekly(LR$SteelCostIndex,LR$IOPrices) #Negi, very Sig
+FactorResultWeekly(LR$LongStock,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$BarStock,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$HRCStock,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$兰格钢铁.钢材库存指数.板材.热轧,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$IOProducationIncreaseRate,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$IOProducationAmount,LR$IOPrices) #Negi, not Sig
+FactorResultWeekly(LR$BDI,LR$IOPrices) #Negi, not Sig
+FactorResultWeekly(LR$FineCURate,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$BlastCURate,LR$IOPrices) #Posi, very Sig
+FactorResultWeekly(LR$FactoryRevenueRate,LR$IOPrices) #Posi, Sig
+FactorResultWeekly(LR$BarPriceIndex,LR$IOPrices) #Negi, not Sig
+FactorResultWeekly(LR$BarPriceChina,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$MetalIndustryInvestment,LR$IOPrices) #Negi, not Sig
+FactorResultWeekly(LR$REIndex,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$LandBought,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$ClarksonsIndex,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$CarSalesAmount,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$CarPriceIndex,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$CarProducation,LR$IOPrices) #Posi, not Sig
+FactorResultWeekly(LR$BarFuturePrice,LR$IOPrices) #Negi, not Sig
+
+#同样的变成moving average
+MovingLR <- LR
+step <- 8
+MovingLR <- MovingLR[(step):dim(LR)[1],]
+for(j in 5:(dim(data)[2]-5))
+{
+  MovingLR[,j] <- rollEWMA(LR[,j],step)
+}
+
+#Deal with Inf and NaN
+for(i in 2:dim(MovingLR)[1])
+{
+  for(j in 5:(dim(MovingLR)[2]-5))
+  {
+    if(is.infinite(MovingLR[i,j])||is.nan(MovingLR[i,j]))
+      MovingLR[i,j] <- MovingLR[i-1,j]
+  }
+}
+
+FactorResultW <- function(x,y,holding = 1,outputdetail = 0)
+{
+  tresult <- FactorResultWeekly(x,y,1)
+  flag <- sign(tresult[2])
+  if(holding==1)
+  {
+    temp <- cbind(x,y)
+    temp <- as.data.frame(temp[complete.cases(temp),])
+    returnlist <- vector()
+    if(flag==1)
+    {
+      for(i in 1:(dim(temp)[1]-1))
+      {
+        if(temp$x[i]>0)
+        {
+          returnlist[i] <- temp$y[i+1]
+        }
+        else
+          returnlist[i] <- -temp$y[i+1]
+      }
+    }
+    if(flag==-1)
+    {
+      for(i in 1:(dim(temp)[1]-1))
+      {
+        if(temp$x[i]>0)
+        {
+          returnlist[i] <- -temp$y[i+1]
+        }
+        else
+          returnlist[i] <- temp$y[i+1]
+      }
+    }
+    returntotal <- prod(exp(returnlist))-1
+    returnl <- list()
+    returnl[[1]] <- returntotal
+    returnl[[2]] <- returnlist
+    if(outputdetail==1)
+      return(returnl)
+    else
+      return(returntotal)
+  }
+  else #Holding Period is not 1 day, not done yet
+  {
+    temp <- cbind(x,y)
+    temp <- as.data.frame(temp[complete.cases(temp),])
+    returnlist <- vector()
+    n <- dim(temp)[1]
+    for(i in 1:(n-holding+1))
+    {
+      temp$y[i] <- sum(temp$y[i:(i+holding-1)])
+    }
+  }
+}
+
+FactorResultW1 <- function(x,y,holding = 1,outputdetail = 0)
+{
+  tresult <- FactorResult(x,y,1)
+  flag <- sign(tresult[2])
+  if(holding==1)
+  {
+    temp <- cbind(x,y)
+    temp <- as.data.frame(temp[complete.cases(temp),])
+    returnlist <- vector()
+    if(flag==1)
+    {
+      for(i in 1:(dim(temp)[1]-1))
+      {
+        if(temp$x[i]>0)
+        {
+          returnlist[i] <- temp$y[i+1]
+        }
+        else
+          returnlist[i] <- -temp$y[i+1]
+      }
+    }
+    if(flag==-1)
+    {
+      for(i in 1:(dim(temp)[1]-1))
+      {
+        if(temp$x[i]>0)
+        {
+          returnlist[i] <- -temp$y[i+1]
+        }
+        else
+          returnlist[i] <- temp$y[i+1]
+      }
+    }
+    returntotal <- prod(exp(returnlist))-1
+    returnl <- list()
+    returnl[[1]] <- returntotal
+    returnl[[2]] <- returnlist
+    if(outputdetail==1)
+      return(returnl)
+    else
+      return(returntotal)
+  }
+  else #Holding Period is not 1 day, not done yet
+  {
+    temp <- cbind(x,y)
+    temp <- as.data.frame(temp[complete.cases(temp),])
+    returnlist <- vector()
+    n <- dim(temp)[1]
+    for(i in 1:(n-holding+1))
+    {
+      temp$y[i] <- sum(temp$y[i:(i+holding-1)])
+    }
+  }
+}
+
+IOreturns<- NA
+RBreturns<- NA
+HCreturns<- NA
+Jreturns<- NA
+JMreturns <- NA
+name <- names(MovingLR)
+IOreturns <- data.frame((dim(MovingLR)[2]),3)
+for(i in 5:(dim(MovingLR)[2]-5))
+{
+  temp <- FactorResultW(MovingLR[,i],MovingLR$IOPrices,1,1)
+  IOreturns[i-4,2] <- temp[[1]]
+  IOreturns[i-4,3] <- mean(as.numeric(temp[[2]]>0))
+  IOreturns[i-4,1] <- name[i]
+}
+
+RBreturns <- data.frame((dim(MovingLR)[2]),3)
+for(i in 5:(dim(MovingLR)[2]-5))
+{
+  if(is.infinite(MovingLR[1,i]))
+    MovingLR[1,i] = 0
+  temp <- FactorResultW1(MovingLR[,i],MovingLR$RBPrices,1,1)
+  RBreturns[i-4,2] <- temp[[1]]
+  RBreturns[i-4,3] <- mean(as.numeric(temp[[2]]>0))
+  RBreturns[i-4,1] <- name[i]
+}
+
+HCreturns <- data.frame((dim(MovingLR)[2]),3)
+for(i in 5:(dim(MovingLR)[2]-5))
+{
+  temp <- FactorResultW(MovingLR[,i],MovingLR$HRCPrices,1,1)
+  HCreturns[i-4,2] <- temp[[1]]
+  HCreturns[i-4,3] <- mean(as.numeric(temp[[2]]>0))
+  HCreturns[i-4,1] <- name[i]
+}
+
+Jreturns <- data.frame((dim(MovingLR)[2]),3)
+for(i in 5:(dim(MovingLR)[2]-5))
+{
+  temp <- FactorResultW(MovingLR[,i],MovingLR$Jprices,1,1)
+  Jreturns[i-4,2] <- temp[[1]]
+  Jreturns[i-4,3] <- mean(as.numeric(temp[[2]]>0))
+  Jreturns[i-4,1] <- name[i]
+}
+
+JMreturns <- data.frame((dim(MovingLR)[2]),3)
+for(i in 5:(dim(MovingLR)[2]-5))
+{
+  temp <- FactorResultW(MovingLR[,i],MovingLR$JMPrices,1,1)
+  JMreturns[i-4,2] <- temp[[1]]
+  JMreturns[i-4,3] <- mean(as.numeric(temp[[2]]>0))
+  JMreturns[i-4,1] <- name[i]
+}
+
+TotalWeeklyDataReturn <- cbind(IOreturns[,1:2],RBreturns[,2],HCreturns[,2],Jreturns[,2],JMreturns[,2])
+names(TotalWeeklyDataReturn) <- c("Indicator","IO","RB","HC","J","JM")
+
+TotalWeeklyDataReturnWinRate <- cbind(IOreturns[,c(1,3)],RBreturns[,3],HCreturns[,3],Jreturns[,3],JMreturns[,3])
+names(TotalWeeklyDataReturnWinRate) <- c("Indicator","IO","RB","HC","J","JM")
+
+length(LR$JMPrices[!is.na(LR$JMPrices)])
+length(LR$Jprices[!is.na(LR$Jprices)])
+
+#接下来的任务，1. 测试一下monthly data的表现 2.测试一下那些新的因子数据的表现怎么样 3. 测试一下别的黑色系的表现
+#注意在做的过程中要不断的看算的logreturn和收益率对不对
+
+length(DLR$IO[!is.na(DLR$IO)])
+length(DLR$IO[!is.na(DLR$RB)])
+length(DLR$IO[!is.na(DLR$HC)])
+
+#Daily t value ratio
+
+na <- names(MovingDLR)
+name <- vector()
+tvalue <- vector()
+for(i in 8:(dim(MovingDLR)[2]))
+{
+  tvalue[i-7] <- tRatioNotFull(MovingDLR[,i],MovingDLR$IO)
+  name[i-7] <- na[i]
+}
+IOtotal <- cbind(name,tvalue)
+
+na <- names(MovingDLR)
+name <- vector()
+tvalue <- vector()
+for(i in 8:(dim(MovingDLR)[2]))
+{
+  tvalue[i-7] <- tRatioNotFull(MovingDLR[,i],MovingDLR$RB)
+  name[i-7] <- na[i]
+}
+RBtotal <- cbind(name,tvalue)
+
+na <- names(MovingDLR)
+name <- vector()
+tvalue <- vector()
+for(i in 8:(dim(MovingDLR)[2]))
+{
+  tvalue[i-7] <- tRatioNotFull(MovingDLR[,i],MovingDLR$HC)
+  name[i-7] <- na[i]
+  
+}
+HCtotal <- cbind(name,tvalue)
+
+na <- names(MovingDLR)
+name <- vector()
+tvalue <- vector()
+for(i in 8:(dim(MovingDLR)[2]))
+{
+  tvalue[i-7] <- tRatioNotFull(MovingDLR[,i],MovingDLR$J)
+  name[i-7] <- na[i]
+  
+}
+Jtotal <- cbind(name,tvalue)
+
+na <- names(MovingDLR)
+name <- vector()
+tvalue <- vector()
+for(i in 8:(dim(MovingDLR)[2]))
+{
+  tvalue[i-7] <- tRatioNotFull(MovingDLR[,i],MovingDLR$JM)
+  name[i-7] <- na[i]
+  
+}
+JMtotal <- cbind(name,tvalue)
+
+
+tratio <- as.data.frame(cbind(IOtotal[,1:2],RBtotal[,2],HCtotal[,2],Jtotal[,2],JMtotal[,2]))
+names(tratio) <- c("","IO","RB","HC","J","JM")
+
+#Weekly t value ratio
+
+na <- names(MovingLR)
+name <- vector()
+tvalue <- vector()
+for(i in 5:(dim(MovingLR)[2]-3))
+{
+  if(is.na(MovingLR[1,i])||is.infinite(MovingLR[1,i]))
+  {
+    if(is.infinite(MovingLR[1,i]))
+    {
+      MovingLR[1,i] <- 0
+    }
+    tvalue[i-4] <- tRatioFull(MovingLR[,i],MovingLR$IOPrices)
+    name[i-4] <- na[i]    
+  }
+  else
+  {  
+    tvalue[i-4] <- tRatioNotFull(MovingLR[,i],MovingLR$IOPrices)
+    name[i-4] <- na[i]
+  }
+}
+IOtotalW <- cbind(name,tvalue)
+
+na <- names(MovingLR)
+name <- vector()
+tvalue <- vector()
+for(i in 5:(dim(MovingLR)[2]-3))
+{
+  if(is.na(MovingLR[1,i])||is.infinite(MovingLR[1,i]))
+  {
+    if(is.infinite(MovingLR[1,i]))
+    {
+      MovingLR[1,i] <- 0
+    }
+    tvalue[i-4] <- tRatioFull(MovingLR[,i],MovingLR$RBPrices)
+    name[i-4] <- na[i]    
+  }
+  else
+  {  
+    tvalue[i-4] <- tRatioNotFull(MovingLR[,i],MovingLR$RBPrices)
+    name[i-4] <- na[i]
+  }
+}
+RBtotalW <- cbind(name,tvalue)
+
+na <- names(MovingLR)
+name <- vector()
+tvalue <- vector()
+for(i in 5:(dim(MovingLR)[2]-3))
+{
+  if(is.na(MovingLR[1,i])||is.infinite(MovingLR[1,i]))
+  {
+    if(is.infinite(MovingLR[1,i]))
+    {
+      MovingLR[1,i] <- 0
+    }
+    tvalue[i-4] <- tRatioFull(MovingLR[,i],MovingLR$HRCPrices)
+    name[i-4] <- na[i]    
+  }
+  else
+  {  
+    tvalue[i-4] <- tRatioNotFull(MovingLR[,i],MovingLR$HRCPrices)
+    name[i-4] <- na[i]
+  }
+}
+HCtotalW <- cbind(name,tvalue)
+
+na <- names(MovingLR)
+name <- vector()
+tvalue <- vector()
+for(i in 5:(dim(MovingLR)[2]-5))
+{
+  if(is.na(MovingLR[1,i])||is.infinite(MovingLR[1,i]))
+  {
+    if(is.infinite(MovingLR[1,i]))
+    {
+      MovingLR[1,i] <- 0
+    }
+    tvalue[i-4] <- tRatioFull(MovingLR[,i],MovingLR$Jprices)
+    name[i-4] <- na[i]    
+  }
+  else
+  {  
+    tvalue[i-4] <- tRatioNotFull(MovingLR[,i],MovingLR$Jprices)
+    name[i-4] <- na[i]
+  }
+}
+JtotalW <- cbind(name,tvalue)
+
+na <- names(MovingLR)
+name <- vector()
+tvalue <- vector()
+for(i in 5:(dim(MovingLR)[2]-5))
+{
+  if(is.na(MovingLR[1,i])||is.infinite(MovingLR[1,i]))
+  {
+    if(is.infinite(MovingLR[1,i]))
+    {
+      MovingLR[1,i] <- 0
+    }
+    tvalue[i-4] <- tRatioFull(MovingLR[,i],MovingLR$JMPrices)
+    name[i-4] <- na[i]    
+  }
+  else
+  {  
+    tvalue[i-4] <- tRatioNotFull(MovingLR[,i],MovingLR$JMPrices)
+    name[i-4] <- na[i]
+  }
+}
+JMtotalW <- cbind(name,tvalue)
+
+tratioW <- as.data.frame(cbind(IOtotalW[,1:2],RBtotalW[,2],HCtotalW[,2],JtotalW[,2],JMtotalW[,2]))
+names(tratioW) <- c("","IO","RB","HC","J","JM")
